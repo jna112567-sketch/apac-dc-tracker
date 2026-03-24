@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>APAC Data Centre Transaction Tracker</title>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
     <style>
         :root {
             --primary-blue: #003366;
@@ -25,7 +26,6 @@
         
         #btn-unify { background-color: #d84315; }
         #btn-unify:hover { background-color: #bf360c; }
-        
         .btn-export { background-color: var(--success-green); margin-left: auto; }
         .btn-export:hover { background-color: #1b5e20; }
         
@@ -37,7 +37,6 @@
         th { background-color: #eee; color: var(--primary-blue); text-align: left; padding: 12px 10px; font-size: 0.85rem; cursor: pointer; user-select: none; transition: background 0.2s; }
         th:hover { background-color: #d5d5d5; }
         .sort-arrow { margin-left: 5px; font-size: 0.8rem; color: var(--accent-gold); }
-
         td { padding: 10px; border-bottom: 1px solid #ddd; font-size: 0.85rem; vertical-align: top; }
         tr:hover { background-color: #f9f9f9; }
 
@@ -48,10 +47,14 @@
         .tag-malaysia { background: #fff3e0; color: #ef6c00; }
         .tag-singapore { background: #f3e5f5; color: #7b1fa2; }
         .tag-japan { background: #ffebee; color: #c62828; }
+        .tag-default { background: #eeeeee; color: #333333; }
 
         .source-link { color: var(--primary-blue); text-decoration: none; font-weight: bold; }
         .source-link:hover { text-decoration: underline; }
         .remarks { color: #555; font-style: italic; max-width: 200px; line-height: 1.4; }
+        
+        /* Loading message styling */
+        #loadingMsg { text-align: center; font-size: 1.2rem; color: var(--accent-gold); padding: 20px; font-weight: bold; }
 
         @media (max-width: 1200px) {
             table, thead, tbody, th, td, tr { display: block; }
@@ -68,16 +71,18 @@
 
 <header>
     <h1>APAC Data Centre Real Estate</h1>
-    <p>Interactive Transaction Tracker (Live Verified URLs)</p>
+    <p>Live Database Tracker (Powered by CSV)</p>
 </header>
 
 <div class="container">
     
-    <div class="chart-container">
+    <div id="loadingMsg">Loading Database...</div>
+
+    <div class="chart-container" style="display:none;" id="chartWrapper">
         <canvas id="transactionChart"></canvas>
     </div>
 
-    <div class="controls">
+    <div class="controls" style="display:none;" id="controlsWrapper">
         <button id="btn-unify" onclick="toggleUnify()">🔄 Unify Units (USD & Sqm)</button>
         
         <span class="filter-label">Filter by Country:</span>
@@ -91,10 +96,10 @@
             <option value="Japan">Japan</option>
         </select>
 
-        <button class="btn-export" onclick="exportToCSV()">💾 Export to CSV</button>
+        <button class="btn-export" onclick="exportToCSV()">💾 Export Current View to CSV</button>
     </div>
 
-    <div class="table-wrapper">
+    <div class="table-wrapper" style="display:none;" id="tableWrapper">
         <table>
             <thead>
                 <tr>
@@ -117,51 +122,76 @@
 </div>
 
 <script>
-    // --- 1. FULL 20-PROPERTY DATABASE WITH LIVE LINKS & FALLBACK QUERIES ---
-    let data = [
-        // SOUTH KOREA
-        { region: "South Korea", class: "tag-korea", asset: "Ansan Hyperscale Platform", buyer: "Macquarie / Gabia (JV)", seller: "-", gfaOrig: "-", gfaSqm: 0, capacity: "100 MW+", localPrice: "KRW 600B", usdPrice: 420.0, dateStr: "Mar 2026", dateVal: new Date("2026-03-03"), remarks: "Strategic AI infrastructure hub partnership.", source: "Macquarie", link: "https://www.macquarie.com/au/en/about/news/2026/macquarie-asset-management-and-gabia-form-strategic-partnership-to-develop-next-generation-hyperscale-data-centre-platform-in-south-korea.html" },
-        { region: "South Korea", class: "tag-korea", asset: "Hanam Data Centre", buyer: "Macquarie (MKIF)", seller: "IGIS Asset Management", gfaOrig: "41,919 sqm", gfaSqm: 41919, capacity: "40 MW", localPrice: "KRW 734B", usdPrice: 543.7, dateStr: "Aug 2024", dateVal: new Date("2024-08-01"), remarks: "En-bloc acquisition. LG CNS anchor.", source: "Macquarie", link: "https://www.macquarie.com/au/en/about/news/2024/macquarie-asset-management-acquires-hanam-data-centre-in-korea.html" },
-        { region: "South Korea", class: "tag-korea", asset: "Incheon Data Centre", buyer: "ESR / Princeton DG", seller: "-", gfaOrig: "11,000 sqm", gfaSqm: 11000, capacity: "48 MW", localPrice: "USD 700M", usdPrice: 700.0, dateStr: "Nov 2025", dateVal: new Date("2025-11-01"), remarks: "First Korean DC project for ESR and PDG.", source: "Mingtiandi", link: "https://www.mingtiandi.com/real-estate/data-centres/esr-princeton-digital-group-enter-korean-data-centre-market-with-700m-incheon-project/" },
-        { region: "South Korea", class: "tag-korea", asset: "SK Group AI DC Stake", buyer: "KKR (Potential)", seller: "SK Group", gfaOrig: "-", gfaSqm: 0, capacity: "103 MW", localPrice: "KRW 2 Trillion", usdPrice: 1400.0, dateStr: "Dec 2025", dateVal: new Date("2025-12-15"), remarks: "Seeking to sell up to 49% stake.", source: "KED Global", link: "https://www.kedglobal.com/artificial-intelligence/newsView/ked202512150002" },
-        { region: "South Korea", class: "tag-korea", asset: "Shinsegae AI Data Center", buyer: "Shinsegae / Reflection AI", seller: "-", gfaOrig: "-", gfaSqm: 0, capacity: "250 MW", localPrice: "Undisclosed", usdPrice: 0, dateStr: "Mar 2026", dateVal: new Date("2026-03-17"), remarks: "Retail giant building Korea's largest AI DC.", source: "Korea Times", link: "https://www.google.com/search?q=Shinsegae+Reflection+AI+Data+Center+Korea+Times" },
-        { region: "South Korea", class: "tag-korea", asset: "Yongin City Hyperscale", buyer: "Warburg Pincus", seller: "DC Connects", gfaOrig: "58,000 sqm", gfaSqm: 58000, capacity: "80 MW", localPrice: "Undisclosed", usdPrice: 0, dateStr: "Sep 2025", dateVal: new Date("2025-09-01"), remarks: "Greenfield land acquisition for liquid-cooling.", source: "Warburg Pincus", link: "https://warburgpincus.com/2025/09/25/warburg-pincus-partners-with-dc-connects/" },
-        { region: "South Korea", class: "tag-korea", asset: "Seoul Data Centre JV", buyer: "Gaw Capital / IMM", seller: "-", gfaOrig: "-", gfaSqm: 0, capacity: "Multiple", localPrice: "Undisclosed", usdPrice: 0, dateStr: "Mid 2024", dateVal: new Date("2024-06-01"), remarks: "Strategic platform expansion in Greater Seoul.", source: "Mingtiandi", link: "https://www.mingtiandi.com/real-estate/data-centres/gaw-capital-forms-korea-data-centre-jv-with-imm-investment/" },
-        
-        // HONG KONG 
-        { region: "Hong Kong", class: "tag-hk", asset: "Fanling Data Centres", buyer: "Actis (Advanced Talks)", seller: "Grand Ming Group", gfaOrig: "Two Assets", gfaSqm: 17187, capacity: "16 MW", localPrice: "HKD 5.25B", usdPrice: 676.0, dateStr: "Oct 2025", dateVal: new Date("2025-10-21"), remarks: "Actis nearing deal after Bain exclusivity lapsed.", source: "Mingtiandi", link: "https://www.mingtiandi.com/real-estate/data-centres/actis-nears-deal-to-buy-676m-in-hong-kong-data-centres-from-grand-ming/" },
-        { region: "Hong Kong", class: "tag-hk", asset: "Equinix HK6 Data Centre", buyer: "Equinix", seller: "-", gfaOrig: "17-Story Site", gfaSqm: 0, capacity: "3,550 cabinets", localPrice: "USD 124M", usdPrice: 124.0, dateStr: "Aug 2024", dateVal: new Date("2024-08-13"), remarks: "Purpose-built site for AI workloads; liquid cooling.", source: "Equinix", link: "https://newsroom.equinix.com/2024-08-12-Equinix-Expands-Hong-Kongs-Footprint-with-124M-Data-Center-Investment" },
-        { region: "Hong Kong", class: "tag-hk", asset: "Goodman HK Partnership", buyer: "Goodman Group (JV)", seller: "-", gfaOrig: "2.3M sq ft", gfaSqm: 213677, capacity: "180 MW", localPrice: "USD 2.7B", usdPrice: 2700.0, dateStr: "Jul 2025", dateVal: new Date("2025-07-01"), remarks: "Major institutional investment vehicle.", source: "Goodman", link: "https://us.goodman.com/about-goodman/media-center/latest-news/2025/goodman-launches-major-hong-kong-data-centre-partnership" },
-        { region: "Hong Kong", class: "tag-hk", asset: "Tsing Yi Data Center", buyer: "Global Engine", seller: "Undisclosed", gfaOrig: "Colocation", gfaSqm: 0, capacity: "Colocation", localPrice: "HKD 17.5M", usdPrice: 2.25, dateStr: "Dec 2024", dateVal: new Date("2024-12-01"), remarks: "Acquisition to capture Greater Bay Area demand.", source: "Global Engine", link: "https://ir.globalengine.com.hk/pressreleases/detail/ce881848-1a6b-4612-83ae-0699619858da" },
-        { region: "Hong Kong", class: "tag-hk", asset: "Kwai Chung Hyperscale", buyer: "BDx", seller: "Clifford Capital (Lender)", gfaOrig: "12,000 sqm", gfaSqm: 12000, capacity: "16 MW", localPrice: "Project Finance", usdPrice: 0, dateStr: "May 2025", dateVal: new Date("2025-05-01"), remarks: "Secured major project financing.", source: "W.Media", link: "https://w.media/bdx-raises-funds-for-hong-kong-dc/" },
-        { region: "Hong Kong", class: "tag-hk", asset: "MEGA Plus Expansion", buyer: "SUNeVision", seller: "-", gfaOrig: "474,000 sq ft", gfaSqm: 44036, capacity: "High Density", localPrice: "Undisclosed", usdPrice: 0, dateStr: "Mar 2024", dateVal: new Date("2024-03-01"), remarks: "Power upgrades and expansion for generative AI.", source: "News Search", link: "https://www.google.com/search?q=SUNeVision+MEGA+Plus+expansion+2024" },
-        { region: "Hong Kong", class: "tag-hk", asset: "TKO Cloud Provider Lease", buyer: "Undisclosed Cloud Provider", seller: "Undisclosed Operator", gfaOrig: "-", gfaSqm: 0, capacity: "Major Capacity", localPrice: "Undisclosed", usdPrice: 0, dateStr: "H1 2025", dateVal: new Date("2025-03-01"), remarks: "Major commitment by a cloud service provider.", source: "News Search", link: "https://www.google.com/search?q=Hong+Kong+Data+Centre+Market+TKO+Cloud+Lease+2025" },
-        
-        // WIDER APAC
-        { region: "Australia", class: "tag-australia", asset: "AirTrunk Platform", buyer: "Blackstone / CPPIB", seller: "Macquarie / PSP", gfaOrig: "Multiple", gfaSqm: 0, capacity: "800 MW", localPrice: "AUD 24B", usdPrice: 16100.0, dateStr: "Sep 2024", dateVal: new Date("2024-09-01"), remarks: "Largest data centre transaction globally.", source: "Blackstone", link: "https://www.blackstone.com/news/press/blackstone-and-cpp-investments-to-acquire-airtrunk-for-a24-billion/" },
-        { region: "Malaysia", class: "tag-malaysia", asset: "Yondr Johor Campus", buyer: "Vantage Data Centers", seller: "-", gfaOrig: "73 acres", gfaSqm: 295420, capacity: "300 MW", localPrice: "USD 1.6B", usdPrice: 1600.0, dateStr: "Sep 2025", dateVal: new Date("2025-09-01"), remarks: "Backed by GIC and ADIA.", source: "Vantage DC", link: "https://vantage-dc.com/news/vantage-data-centers-secures-1-6b-investment-in-apac-platform-from-gic-and-adia/" },
-        { region: "Singapore", class: "tag-singapore", asset: "ST Telemedia Global", buyer: "KKR / Singtel", seller: "ST Telemedia", gfaOrig: "Multiple", gfaSqm: 0, capacity: "1.7 GW", localPrice: "SGD 1.75B", usdPrice: 1300.0, dateStr: "Jun 2024", dateVal: new Date("2024-06-01"), remarks: "Platform investment via preference shares.", source: "Singtel", link: "https://www.singtel.com/about-us/media-centre/news-releases/kkr-led-consortium-with-singtel-group-to-fully-acquire-st-telemedia-global-data-centres" },
-        { region: "Japan", class: "tag-japan", asset: "Ascendas REIT Hyperscale", buyer: "CapitaLand Ascendas", seller: "Undisclosed", gfaOrig: "15,000 sqm", gfaSqm: 15000, capacity: "Hyperscale", localPrice: "SGD 1.4B", usdPrice: 1040.0, dateStr: "Mar 2026", dateVal: new Date("2026-03-01"), remarks: "Entry into Japan alongside 2 Singapore assets.", source: "CapitaLand", link: "https://www.capitaland.com/en/about-capitaland/newsroom/news-releases/international/2026/march/capitaland-ascendas-reit-acquires-two-assets-in-Singapore-and-enters-Japan-with-a-hyperscale-data-centre.html" },
-        { region: "Malaysia", class: "tag-malaysia", asset: "GDS Holdings Johor Phase 2", buyer: "GDS Holdings", seller: "-", gfaOrig: "20,000 sqm", gfaSqm: 20000, capacity: "100 MW+", localPrice: "USD 800M", usdPrice: 800.0, dateStr: "Jan 2025", dateVal: new Date("2025-01-01"), remarks: "Expansion in the Nusajaya Tech Park.", source: "W.Media", link: "https://w.media/north-east-asia-data-center-market-enters-ai-driven-growth-phase/" },
-        { region: "Japan", class: "tag-japan", asset: "Saitama Campus", buyer: "Princeton Digital Group", seller: "-", gfaOrig: "33,000 sqm", gfaSqm: 33000, capacity: "96 MW", localPrice: "USD 1.0B", usdPrice: 1000.0, dateStr: "Mid 2024", dateVal: new Date("2024-06-15"), remarks: "Major investment in Greater Tokyo.", source: "Princeton DG", link: "https://princetondg.com/pdg-unveils-1-billion-96mw-data-center-campus-in-tokyo/" }
-    ];
-
+    // Empty array to hold data loaded from CSV
+    let data = [];
     let isUnified = false; 
     let chartInstance = null;
     let currentFilter = "All";
     let sortColumn = "dateVal";
     let sortAscending = false; 
 
+    // --- CSV LOADING LOGIC ---
+    // This tells PapaParse to go grab transactions.csv from your GitHub folder
+    Papa.parse("transactions.csv", {
+        download: true,
+        header: true, // Tells the parser to use the first row as property names
+        skipEmptyLines: true,
+        complete: function(results) {
+            // Hide the loading message and show the app
+            document.getElementById('loadingMsg').style.display = 'none';
+            document.getElementById('chartWrapper').style.display = 'block';
+            document.getElementById('controlsWrapper').style.display = 'flex';
+            document.getElementById('tableWrapper').style.display = 'block';
+
+            // Process the raw CSV text into our JavaScript format
+            data = results.data.map(row => {
+                
+                // Assign color tags based on the Region name in the CSV
+                let tagClass = "tag-default";
+                if (row.Region === "South Korea") tagClass = "tag-korea";
+                else if (row.Region === "Hong Kong") tagClass = "tag-hk";
+                else if (row.Region === "Australia") tagClass = "tag-australia";
+                else if (row.Region === "Malaysia") tagClass = "tag-malaysia";
+                else if (row.Region === "Singapore") tagClass = "tag-singapore";
+                else if (row.Region === "Japan") tagClass = "tag-japan";
+
+                return {
+                    region: row.Region,
+                    class: tagClass,
+                    asset: row.Asset,
+                    buyer: row.Buyer,
+                    seller: row.Seller,
+                    gfaOrig: row.GFA_Original,
+                    gfaSqm: parseFloat(row.GFA_Sqm) || 0, // Force pure number
+                    capacity: row.Capacity,
+                    localPrice: row.Consideration_Local,
+                    usdPrice: parseFloat(row.Consideration_USD_Millions) || 0, // Force pure number
+                    dateStr: row.Date_String,
+                    dateVal: new Date(row.Date_Value), // Convert "YYYY-MM-DD" text into a real Date
+                    remarks: row.Remarks,
+                    source: row.Source_Name,
+                    link: row.Direct_URL
+                };
+            });
+
+            // After data is loaded and formatted, draw the page!
+            sortTable('dateVal'); 
+            renderChart(); 
+        },
+        error: function(err) {
+            document.getElementById('loadingMsg').innerHTML = "⚠️ Error loading transactions.csv. Make sure the file is uploaded to GitHub and named correctly.";
+            document.getElementById('loadingMsg').style.color = "red";
+        }
+    });
+
+    // --- SMART FORMATTING FUNCTIONS ---
     function formatConsideration(item) {
         if (item.usdPrice === 0) return "Undisclosed";
         if (isUnified) {
-            if (item.usdPrice >= 1000) {
-                return `USD ${(item.usdPrice / 1000).toFixed(1)}B`;
-            } else {
-                return `USD ${item.usdPrice}M`;
-            }
+            if (item.usdPrice >= 1000) return `USD ${(item.usdPrice / 1000).toFixed(1)}B`;
+            else return `USD ${item.usdPrice}M`;
         } else {
-            return item.localPrice;
+            return item.localPrice || "-";
         }
     }
 
@@ -169,7 +199,7 @@
         if (isUnified) {
             return item.gfaSqm > 0 ? item.gfaSqm.toLocaleString() + " sqm" : "-";
         } else {
-            return item.gfaOrig;
+            return item.gfaOrig || "-";
         }
     }
 
@@ -186,32 +216,7 @@
         renderTable(); 
     }
 
-    function exportToCSV() {
-        let csvRows = [];
-        csvRows.push("Region,Asset / Project,Buyer / Investor,Seller / Developer,GFA,Capacity,Consideration,Date,Remarks,Source,Direct_URL");
-        let displayData = currentFilter === "All" ? data : data.filter(item => item.region === currentFilter);
-        displayData.forEach(item => {
-            let priceText = formatConsideration(item);
-            let gfaText = formatGFA(item);
-            let row = [
-                `"${item.region}"`, `"${item.asset}"`, `"${item.buyer}"`, `"${item.seller}"`,
-                `"${gfaText}"`, `"${item.capacity}"`, `"${priceText}"`, `"${item.dateStr}"`,
-                `"${item.remarks}"`, `"${item.source}"`, `"${item.link}"`
-            ];
-            csvRows.push(row.join(","));
-        });
-        const csvString = csvRows.join("\n");
-        const blob = new Blob([csvString], { type: 'text/csv;charset=utf-8;' });
-        const link = document.createElement("a");
-        const url = URL.createObjectURL(blob);
-        link.setAttribute("href", url);
-        link.setAttribute("download", "APAC_DC_Transactions.csv");
-        link.style.visibility = 'hidden';
-        document.body.appendChild(link);
-        link.click();
-        document.body.removeChild(link);
-    }
-
+    // --- FILTERING & SORTING ---
     function applyFilter() {
         currentFilter = document.getElementById("regionFilter").value;
         renderTable();
@@ -244,6 +249,7 @@
         if (arrowSpan) { arrowSpan.innerHTML = sortAscending ? " ▲" : " ▼"; }
     }
 
+    // --- HTML GENERATION ---
     function renderTable() {
         const tbody = document.getElementById('tableBody');
         tbody.innerHTML = ""; 
@@ -297,8 +303,28 @@
         });
     }
 
-    sortTable('dateVal'); 
-    renderChart(); 
+    function exportToCSV() {
+        // Simple export of current view
+        let csvRows = ["Region,Asset / Project,Buyer / Investor,Seller / Developer,GFA,Capacity,Consideration,Date,Remarks,Source,Direct_URL"];
+        let displayData = currentFilter === "All" ? data : data.filter(item => item.region === currentFilter);
+        displayData.forEach(item => {
+            let priceText = formatConsideration(item).replace(/"/g, '""');
+            let gfaText = formatGFA(item).replace(/"/g, '""');
+            let row = [
+                `"${item.region}"`, `"${item.asset}"`, `"${item.buyer}"`, `"${item.seller}"`,
+                `"${gfaText}"`, `"${item.capacity}"`, `"${priceText}"`, `"${item.dateStr}"`,
+                `"${item.remarks}"`, `"${item.source}"`, `"${item.link}"`
+            ];
+            csvRows.push(row.join(","));
+        });
+        const blob = new Blob([csvRows.join("\n")], { type: 'text/csv;charset=utf-8;' });
+        const link = document.createElement("a");
+        link.href = URL.createObjectURL(blob);
+        link.download = "APAC_DC_Export.csv";
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+    }
 </script>
 
 </body>
