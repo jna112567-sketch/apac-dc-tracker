@@ -7,6 +7,7 @@ import urllib.parse
 import os
 import yfinance as yf
 import requests
+import sqlite3
 
 # ==========================================
 # 1. PAGE CONFIG & APP SETUP
@@ -111,46 +112,64 @@ def load_live_macro_data():
 # ==========================================
 # 3. TRANSACTION DATA LOADING
 # ==========================================
-def create_default_excel():
-    tx_data = [
-        ["South Korea", "Ansan Hyperscale", "Macquarie", "Gabia", 450000, "sqft", 100, 600, "KRW", "2026-03-03", "Strategic AI Hub", "Macquarie", "https://example.com"],
-        ["Hong Kong", "Fanling DCs", "Actis", "Grand Ming", 17187, "sqm", 16, 5250, "HKD", "2026-10-21", "Advanced Talks", "Mingtiandi", "https://example.com"]
-    ]
-    df_tx = pd.DataFrame(tx_data, columns=EXPECTED_TX_COLUMNS)
-    df_tx.to_excel(DB_FILE, index=False, sheet_name='Transactions')
-    return df_tx
+DB_SQLITE = "datacenter.db"
+
+def init_sqlite_db():
+    """Creates the database and table if they don't exist, and adds sample data."""
+    conn = sqlite3.connect(DB_SQLITE)
+    cursor = conn.cursor()
+    # Create the table using the columns we need
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS transactions (
+            Region TEXT, Asset TEXT, Buyer TEXT, Seller TEXT, 
+            GFA_Value REAL, GFA_Unit TEXT, Capacity_MW REAL, 
+            Consideration_Value REAL, Currency TEXT, Date TEXT, 
+            Remarks TEXT, Source TEXT, URL TEXT
+        )
+    ''')
+    
+    # Check if it's empty; if so, add the seed data
+    cursor.execute("SELECT COUNT(*) FROM transactions")
+    if cursor.fetchone()[0] == 0:
+        seed_data = [
+            ("South Korea", "Ansan Hyperscale", "Macquarie", "Gabia", 450000, "sqft", 100, 600, "KRW", "2026-03-03", "Strategic AI Hub", "Macquarie", "https://example.com"),
+            ("Hong Kong", "Fanling DCs", "Actis", "Grand Ming", 17187, "sqm", 16, 5250, "HKD", "2026-10-21", "Advanced Talks", "Mingtiandi", "https://example.com")
+        ]
+        cursor.executemany('''
+            INSERT INTO transactions VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
+        ''', seed_data)
+        conn.commit()
+    conn.close()
 
 @st.cache_data
 def load_tx_data():
-    if not os.path.exists(DB_FILE):
-        df_tx = create_default_excel()
-    else:
-        try:
-            df_tx = pd.read_excel(DB_FILE, sheet_name='Transactions')
-        except Exception:
-            df_tx = create_default_excel()
+    """Loads data from SQLite, converts to DataFrame, and performs live FX/Calculations"""
+    init_sqlite_db() # Ensure DB exists
+    
+    conn = sqlite3.connect(DB_SQLITE)
+    df_tx = pd.read_sql("SELECT * FROM transactions", conn)
+    conn.close()
 
-    # Get the live FX rates we generated above!
+    # --- THE REST OF YOUR LOGIC (Live FX & Formatting) ---
     live_fx = get_live_fx()
-
     df_tx['Date'] = pd.to_datetime(df_tx['Date'], errors='coerce')
+    
     for col in ['Consideration_Value', 'Capacity_MW', 'GFA_Value']:
         df_tx[col] = pd.to_numeric(df_tx[col], errors='coerce').fillna(0)
     
     # Calculate using live exchange rates
     df_tx['Consideration_USD_M'] = df_tx['Consideration_Value'] * df_tx['Currency'].map(live_fx).fillna(1.0)
     df_tx['GFA_sqm'] = df_tx['GFA_Value'] * df_tx['GFA_Unit'].map(AREA_RATES).fillna(1.0)
+    
+    # Map coordinates
     df_tx['lat'] = df_tx['Region'].map(lambda x: GEO_COORDS.get(x, {}).get("lat", 0))
     df_tx['lon'] = df_tx['Region'].map(lambda x: GEO_COORDS.get(x, {}).get("lon", 0))
     
-    def generate_search_link(row):
-        query = f'"{row.get("Buyer","")}" AND "{row.get("Seller","")}" data center "{row.get("Region","")}" transaction'
-        query_encoded = urllib.parse.quote_plus(query)
-        return f"https://www.google.com/search?q={query_encoded}"
-        
-    df_tx['Suggested_Search'] = df_tx.apply(generate_search_link, axis=1)
+    # Generate search links
+    df_tx['Suggested_Search'] = df_tx.apply(lambda row: f"https://www.google.com/search?q={urllib.parse.quote_plus(f'\"{row.get(\"Buyer\",\"\")}\" \"{row.get(\"Seller\",\"\")}\" data center {row.get(\"Region\",\"\")}')}", axis=1)
+    
     return df_tx
-
+# --- EXECUTION ---
 df = load_tx_data()
 macro_df = load_live_macro_data()
 
@@ -295,3 +314,55 @@ with tab4:
                     st.write("") 
         except Exception:
             st.warning("Could not load news feed at this time.")
+            # --- TAB 5: ADMIN DATA ENTRY ---
+with st.expander("🔐 Admin: Add New Transaction"):
+    st.info("Fill out the details below to add a new deal to the SQLite database.")
+    
+    with st.form("admin_entry_form", clear_on_submit=True):
+        col1, col2, col3 = st.columns(3)
+        
+        with col1:
+            new_region = st.selectbox("Region", list(GEO_COORDS.keys()))
+            new_asset = st.text_input("Asset Name", placeholder="e.g. Sydney North DC")
+            new_buyer = st.text_input("Buyer")
+            new_seller = st.text_input("Seller")
+            
+        with col2:
+            new_gfa = st.number_input("GFA Value", min_value=0.0)
+            new_unit = st.selectbox("GFA Unit", ["sqm", "sqft", "acres"])
+            new_mw = st.number_input("Capacity (MW)", min_value=0.0)
+            
+        with col3:
+            new_price = st.number_input("Consideration (Local)", min_value=0.0)
+            new_curr = st.selectbox("Currency", ["USD", "KRW", "HKD", "AUD", "SGD", "JPY"])
+            new_date = st.date_input("Transaction Date")
+            new_url = st.text_input("Source URL")
+
+        new_remarks = st.text_area("Remarks")
+        
+        submit_button = st.form_submit_button("Add Transaction to Database")
+        
+        if submit_button:
+            if new_asset and new_buyer:
+                try:
+                    conn = sqlite3.connect(DB_SQLITE)
+                    cursor = conn.cursor()
+                    cursor.execute('''
+                        INSERT INTO transactions (
+                            Region, Asset, Buyer, Seller, GFA_Value, GFA_Unit, 
+                            Capacity_MW, Consideration_Value, Currency, Date, 
+                            Remarks, Source, URL
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ''', (
+                        new_region, new_asset, new_buyer, new_seller, new_gfa, new_unit,
+                        new_mw, new_price, new_curr, str(new_date), new_remarks, "Manual Entry", new_url
+                    ))
+                    conn.commit()
+                    conn.close()
+                    st.success(f"✅ Successfully added {new_asset} to the database!")
+                    st.cache_data.clear() # Clears cache so the new data shows up immediately
+                    st.rerun() 
+                except Exception as e:
+                    st.error(f"Error updating database: {e}")
+            else:
+                st.warning("Please fill in at least the Asset Name and Buyer.")
