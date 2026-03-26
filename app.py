@@ -7,7 +7,6 @@ import urllib.parse
 import os
 import yfinance as yf
 import requests
-import sqlite3
 
 # ==========================================
 # 1. PAGE CONFIG & APP SETUP
@@ -127,12 +126,15 @@ def init_sqlite_db():
         conn.commit()
     conn.close()
 
-@st.cache_data
+# We cache it for 600 seconds (10 mins). If you edit the Google Sheet, 
+# the dashboard will automatically pull the new data after 10 minutes!
+@st.cache_data(ttl=600) 
 def load_tx_data():
-    init_sqlite_db()
-    conn = sqlite3.connect(DB_SQLITE)
-    df_tx = pd.read_sql("SELECT * FROM transactions", conn)
-    conn.close()
+    # PASTE YOUR PUBLISHED GOOGLE SHEETS CSV LINK HERE:
+    # Wrap the link in quotes!
+    SHEET_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vTC_BPm2epkPFS8QOW701NAW2xPtyNLlzXONjZqXg0O7QMqDU27hR-4QxXxkCngmTVhxzOvrNFdyk-q/pub?output=csv"
+    # Pandas reads the live Google Sheet instantly
+    df_tx = pd.read_csv(SHEET_URL)
     
     fx = get_live_fx()
     df_tx['Date'] = pd.to_datetime(df_tx['Date'], errors='coerce')
