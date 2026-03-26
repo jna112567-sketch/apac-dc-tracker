@@ -13,6 +13,7 @@
             --bg-light: #f4f7f9;
             --text-dark: #333;
             --success-green: #2e7d32;
+            --source-gray: #455a64;
         }
 
         body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: var(--bg-light); color: var(--text-dark); margin: 0; padding: 20px; }
@@ -21,13 +22,25 @@
         .container { max-width: 98%; margin: 0 auto; background: white; padding: 20px; border-radius: 8px; box-shadow: 0 4px 15px rgba(0,0,0,0.1); }
         
         .controls { display: flex; gap: 15px; margin-bottom: 20px; flex-wrap: wrap; align-items: center; }
-        button, select { background-color: var(--primary-blue); color: white; border: none; padding: 10px 15px; border-radius: 5px; cursor: pointer; font-weight: bold; transition: background 0.3s; font-size: 1rem; }
-        button:hover, select:hover { background-color: var(--accent-gold); }
+        
+        /* Unified Button Styles */
+        button, select, a.btn-link { 
+            background-color: var(--primary-blue); color: white; border: none; padding: 10px 15px; 
+            border-radius: 5px; cursor: pointer; font-weight: bold; transition: background 0.3s; 
+            font-size: 1rem; text-decoration: none; display: inline-block; font-family: inherit;
+        }
+        button:hover, select:hover, a.btn-link:hover { background-color: var(--accent-gold); }
         
         #btn-unify { background-color: #d84315; }
         #btn-unify:hover { background-color: #bf360c; }
+        
+        /* Export Filtered View Button */
         .btn-export { background-color: var(--success-green); margin-left: auto; }
         .btn-export:hover { background-color: #1b5e20; }
+
+        /* NEW: Download Source CSV Button */
+        .btn-source { background-color: var(--source-gray); }
+        .btn-source:hover { background-color: #263238; }
         
         .filter-label { font-weight: bold; color: var(--primary-blue); }
         .chart-container { width: 100%; height: 350px; margin-bottom: 30px; padding-bottom: 20px; border-bottom: 2px solid #eee; }
@@ -53,7 +66,6 @@
         .source-link:hover { text-decoration: underline; }
         .remarks { color: #555; font-style: italic; max-width: 200px; line-height: 1.4; }
         
-        /* Loading message styling */
         #loadingMsg { text-align: center; font-size: 1.2rem; color: var(--accent-gold); padding: 20px; font-weight: bold; }
 
         @media (max-width: 1200px) {
@@ -63,7 +75,7 @@
             td { border: none; position: relative; padding-left: 35%; padding-top: 10px; min-height: 24px;}
             td:before { position: absolute; top: 10px; left: 15px; width: 30%; font-weight: bold; content: attr(data-label); color: var(--primary-blue); }
             .remarks { max-width: 100%; }
-            .btn-export { margin-left: 0; width: 100%; }
+            .btn-export, .btn-source { margin-left: 0; width: 100%; text-align: center; box-sizing: border-box; }
         }
     </style>
 </head>
@@ -96,7 +108,9 @@
             <option value="Japan">Japan</option>
         </select>
 
-        <button class="btn-export" onclick="exportToCSV()">💾 Export Current View to CSV</button>
+        <button class="btn-export" onclick="exportToCSV()">💾 Export Filtered View</button>
+        
+        <a href="transactions.csv" download="APAC_DC_Master_Database.csv" class="btn-link btn-source">📥 Download Source CSV</a>
     </div>
 
     <div class="table-wrapper" style="display:none;" id="tableWrapper">
@@ -122,7 +136,6 @@
 </div>
 
 <script>
-    // Empty array to hold data loaded from CSV
     let data = [];
     let isUnified = false; 
     let chartInstance = null;
@@ -131,22 +144,17 @@
     let sortAscending = false; 
 
     // --- CSV LOADING LOGIC ---
-    // This tells PapaParse to go grab transactions.csv from your GitHub folder
     Papa.parse("transactions.csv", {
         download: true,
-        header: true, // Tells the parser to use the first row as property names
+        header: true, 
         skipEmptyLines: true,
         complete: function(results) {
-            // Hide the loading message and show the app
             document.getElementById('loadingMsg').style.display = 'none';
             document.getElementById('chartWrapper').style.display = 'block';
             document.getElementById('controlsWrapper').style.display = 'flex';
             document.getElementById('tableWrapper').style.display = 'block';
 
-            // Process the raw CSV text into our JavaScript format
             data = results.data.map(row => {
-                
-                // Assign color tags based on the Region name in the CSV
                 let tagClass = "tag-default";
                 if (row.Region === "South Korea") tagClass = "tag-korea";
                 else if (row.Region === "Hong Kong") tagClass = "tag-hk";
@@ -162,19 +170,18 @@
                     buyer: row.Buyer,
                     seller: row.Seller,
                     gfaOrig: row.GFA_Original,
-                    gfaSqm: parseFloat(row.GFA_Sqm) || 0, // Force pure number
+                    gfaSqm: parseFloat(row.GFA_Sqm) || 0, 
                     capacity: row.Capacity,
                     localPrice: row.Consideration_Local,
-                    usdPrice: parseFloat(row.Consideration_USD_Millions) || 0, // Force pure number
+                    usdPrice: parseFloat(row.Consideration_USD_Millions) || 0, 
                     dateStr: row.Date_String,
-                    dateVal: new Date(row.Date_Value), // Convert "YYYY-MM-DD" text into a real Date
+                    dateVal: new Date(row.Date_Value), 
                     remarks: row.Remarks,
                     source: row.Source_Name,
                     link: row.Direct_URL
                 };
             });
 
-            // After data is loaded and formatted, draw the page!
             sortTable('dateVal'); 
             renderChart(); 
         },
@@ -304,7 +311,6 @@
     }
 
     function exportToCSV() {
-        // Simple export of current view
         let csvRows = ["Region,Asset / Project,Buyer / Investor,Seller / Developer,GFA,Capacity,Consideration,Date,Remarks,Source,Direct_URL"];
         let displayData = currentFilter === "All" ? data : data.filter(item => item.region === currentFilter);
         displayData.forEach(item => {
