@@ -1,3 +1,0 @@
-Region,Asset,Buyer,Seller,GFA_Value,GFA_Unit,Capacity_MW,Consideration_Value,Currency,Date,Remarks,Source,URL
-South Korea,Sample Data Centre,Tech Corp,Real Estate Inc,500000,sqft,20,100,KRW,2026-03-01,Test transaction to verify template.,Tech News,https://example.com
-Hong Kong,Sample Data Centre,Tech Corp,Real Estate Inc,17187,sqm,16,275,USD,2026-01-01,Test transaction to verify template.,Tech News,https://example.com
