@@ -23,7 +23,6 @@
         
         .controls { display: flex; gap: 15px; margin-bottom: 20px; flex-wrap: wrap; align-items: center; }
         
-        /* Unified Button Styles */
         button, select, a.btn-link { 
             background-color: var(--primary-blue); color: white; border: none; padding: 10px 15px; 
             border-radius: 5px; cursor: pointer; font-weight: bold; transition: background 0.3s; 
@@ -31,14 +30,8 @@
         }
         button:hover, select:hover, a.btn-link:hover { background-color: var(--accent-gold); }
         
-        #btn-unify { background-color: #d84315; }
-        #btn-unify:hover { background-color: #bf360c; }
-        
-        /* Export Filtered View Button */
         .btn-export { background-color: var(--success-green); margin-left: auto; }
         .btn-export:hover { background-color: #1b5e20; }
-
-        /* NEW: Download Source CSV Button */
         .btn-source { background-color: var(--source-gray); }
         .btn-source:hover { background-color: #263238; }
         
@@ -83,7 +76,7 @@
 
 <header>
     <h1>APAC Data Centre Real Estate</h1>
-    <p>Live Database Tracker (Powered by CSV)</p>
+    <p>Live Database Tracker (Auto-Formatting Units)</p>
 </header>
 
 <div class="container">
@@ -95,8 +88,6 @@
     </div>
 
     <div class="controls" style="display:none;" id="controlsWrapper">
-        <button id="btn-unify" onclick="toggleUnify()">🔄 Unify Units (USD & Sqm)</button>
-        
         <span class="filter-label">Filter by Country:</span>
         <select id="regionFilter" onchange="applyFilter()">
             <option value="All">All Regions</option>
@@ -109,7 +100,6 @@
         </select>
 
         <button class="btn-export" onclick="exportToCSV()">💾 Export Filtered View</button>
-        
         <a href="transactions.csv" download="APAC_DC_Master_Database.csv" class="btn-link btn-source">📥 Download Source CSV</a>
     </div>
 
@@ -121,9 +111,9 @@
                     <th onclick="sortTable('asset')">Asset / Project <span id="arrow-asset" class="sort-arrow"></span></th>
                     <th onclick="sortTable('buyer')">Buyer / Investor <span id="arrow-buyer" class="sort-arrow"></span></th>
                     <th onclick="sortTable('seller')">Seller / Developer <span id="arrow-seller" class="sort-arrow"></span></th>
-                    <th onclick="sortTable('gfaSqm')">GFA <span id="arrow-gfaSqm" class="sort-arrow"></span></th>
-                    <th>Capacity</th>
-                    <th onclick="sortTable('usdPrice')">Consideration <span id="arrow-usdPrice" class="sort-arrow"></span></th>
+                    <th onclick="sortTable('gfaNum')">GFA <span id="arrow-gfaNum" class="sort-arrow"></span></th>
+                    <th onclick="sortTable('capacityNum')">Capacity <span id="arrow-capacityNum" class="sort-arrow"></span></th>
+                    <th onclick="sortTable('priceNum')">Consideration <span id="arrow-priceNum" class="sort-arrow"></span></th>
                     <th onclick="sortTable('dateVal')">Date <span id="arrow-dateVal" class="sort-arrow"></span></th>
                     <th>Remarks</th>
                     <th>Direct Article Source</th>
@@ -137,7 +127,6 @@
 
 <script>
     let data = [];
-    let isUnified = false; 
     let chartInstance = null;
     let currentFilter = "All";
     let sortColumn = "dateVal";
@@ -164,21 +153,20 @@
                 else if (row.Region === "Japan") tagClass = "tag-japan";
 
                 return {
-                    region: row.Region,
+                    region: row.Region || "-",
                     class: tagClass,
-                    asset: row.Asset,
-                    buyer: row.Buyer,
-                    seller: row.Seller,
-                    gfaOrig: row.GFA_Original,
-                    gfaSqm: parseFloat(row.GFA_Sqm) || 0, 
-                    capacity: row.Capacity,
-                    localPrice: row.Consideration_Local,
-                    usdPrice: parseFloat(row.Consideration_USD_Millions) || 0, 
-                    dateStr: row.Date_String,
-                    dateVal: new Date(row.Date_Value), 
-                    remarks: row.Remarks,
-                    source: row.Source_Name,
-                    link: row.Direct_URL
+                    asset: row.Asset || "-",
+                    buyer: row.Buyer || "-",
+                    seller: row.Seller || "-",
+                    gfaNum: parseFloat(row.GFA_Number) || 0, // Reads pure number
+                    capacityNum: parseFloat(row.Capacity_Number) || 0, // Reads pure number
+                    currency: row.Currency || "USD",
+                    priceNum: parseFloat(row.Consideration_Number) || 0, // Reads pure number
+                    dateStr: row.Date || "-",
+                    dateVal: row.Date ? new Date(row.Date) : new Date(0), 
+                    remarks: row.Remarks || "-",
+                    source: row.Source || "-",
+                    link: row.URL || "#"
                 };
             });
 
@@ -186,42 +174,10 @@
             renderChart(); 
         },
         error: function(err) {
-            document.getElementById('loadingMsg').innerHTML = "⚠️ Error loading transactions.csv. Make sure the file is uploaded to GitHub and named correctly.";
+            document.getElementById('loadingMsg').innerHTML = "⚠️ Error loading transactions.csv. Make sure the headers match the new template perfectly.";
             document.getElementById('loadingMsg').style.color = "red";
         }
     });
-
-    // --- SMART FORMATTING FUNCTIONS ---
-    function formatConsideration(item) {
-        if (item.usdPrice === 0) return "Undisclosed";
-        if (isUnified) {
-            if (item.usdPrice >= 1000) return `USD ${(item.usdPrice / 1000).toFixed(1)}B`;
-            else return `USD ${item.usdPrice}M`;
-        } else {
-            return item.localPrice || "-";
-        }
-    }
-
-    function formatGFA(item) {
-        if (isUnified) {
-            return item.gfaSqm > 0 ? item.gfaSqm.toLocaleString() + " sqm" : "-";
-        } else {
-            return item.gfaOrig || "-";
-        }
-    }
-
-    function toggleUnify() {
-        isUnified = !isUnified;
-        const btn = document.getElementById('btn-unify');
-        if(isUnified) {
-            btn.innerHTML = "🔙 Revert to Local Units";
-            btn.style.backgroundColor = "#bf360c";
-        } else {
-            btn.innerHTML = "🔄 Unify Units (USD & Sqm)";
-            btn.style.backgroundColor = "#d84315";
-        }
-        renderTable(); 
-    }
 
     // --- FILTERING & SORTING ---
     function applyFilter() {
@@ -256,23 +212,29 @@
         if (arrowSpan) { arrowSpan.innerHTML = sortAscending ? " ▲" : " ▼"; }
     }
 
-    // --- HTML GENERATION ---
+    // --- HTML GENERATION WITH AUTO-UNITS ---
     function renderTable() {
         const tbody = document.getElementById('tableBody');
         tbody.innerHTML = ""; 
         let displayData = currentFilter === "All" ? data : data.filter(item => item.region === currentFilter);
+        
         displayData.forEach(item => {
+            // Auto-append the units for display!
+            let displayGFA = item.gfaNum > 0 ? item.gfaNum.toLocaleString() + " sqm" : "-";
+            let displayCap = item.capacityNum > 0 ? item.capacityNum + " MW" : "-";
+            let displayPrice = item.priceNum > 0 ? `${item.currency} ${item.priceNum.toLocaleString()}M` : "Undisclosed";
+
             const row = `<tr>
                 <td data-label="Region"><span class="tag ${item.class}">${item.region}</span></td>
                 <td data-label="Asset / Project"><strong>${item.asset}</strong></td>
                 <td data-label="Buyer / Investor">${item.buyer}</td>
                 <td data-label="Seller / Developer">${item.seller}</td>
-                <td data-label="GFA">${formatGFA(item)}</td>
-                <td data-label="Capacity">${item.capacity}</td>
-                <td data-label="Consideration">${formatConsideration(item)}</td>
+                <td data-label="GFA">${displayGFA}</td>
+                <td data-label="Capacity">${displayCap}</td>
+                <td data-label="Consideration">${displayPrice}</td>
                 <td data-label="Date">${item.dateStr}</td>
                 <td data-label="Remarks" class="remarks">${item.remarks}</td>
-                <td data-label="Direct Source"><a href="${item.link}" class="source-link" target="_blank">${item.source}</a></td>
+                <td data-label="Direct Article Source"><a href="${item.link}" class="source-link" target="_blank">${item.source}</a></td>
             </tr>`;
             tbody.innerHTML += row;
         });
@@ -281,22 +243,25 @@
     function renderChart() {
         const ctx = document.getElementById('transactionChart').getContext('2d');
         let displayData = currentFilter === "All" ? data : data.filter(item => item.region === currentFilter);
+        
+        // Chart uses the pure numbers we got back!
         const regionTotals = {};
         displayData.forEach(d => {
-            if (d.usdPrice > 0) { 
+            if (d.priceNum > 0) { 
                 if (!regionTotals[d.region]) { regionTotals[d.region] = 0; }
-                regionTotals[d.region] += d.usdPrice;
+                regionTotals[d.region] += d.priceNum;
             }
         });
         const sortedRegions = Object.keys(regionTotals).sort((a, b) => regionTotals[b] - regionTotals[a]);
         const values = sortedRegions.map(region => regionTotals[region]);
+        
         if (chartInstance) chartInstance.destroy();
         chartInstance = new Chart(ctx, {
             type: 'bar',
             data: {
                 labels: sortedRegions,
                 datasets: [{
-                    label: 'Total Consideration (USD Millions)',
+                    label: 'Total Consideration Tracked (Millions)',
                     data: values,
                     backgroundColor: ['#003366', '#c5a059', '#1976d2', '#2e7d32', '#d84315', '#7b1fa2'],
                     borderRadius: 5
@@ -305,28 +270,27 @@
             options: {
                 responsive: true, maintainAspectRatio: false,
                 plugins: { legend: { display: true } },
-                scales: { y: { beginAtZero: true, title: { display: true, text: 'USD Millions' } } }
+                scales: { y: { beginAtZero: true, title: { display: true, text: 'Transaction Value (Millions)' } } }
             }
         });
     }
 
     function exportToCSV() {
-        let csvRows = ["Region,Asset / Project,Buyer / Investor,Seller / Developer,GFA,Capacity,Consideration,Date,Remarks,Source,Direct_URL"];
+        let csvRows = ["Region,Asset,Buyer,Seller,GFA_Number,Capacity_Number,Currency,Consideration_Number,Date,Remarks,Source,URL"];
         let displayData = currentFilter === "All" ? data : data.filter(item => item.region === currentFilter);
         displayData.forEach(item => {
-            let priceText = formatConsideration(item).replace(/"/g, '""');
-            let gfaText = formatGFA(item).replace(/"/g, '""');
+            let remarks = item.remarks.replace(/"/g, '""');
             let row = [
                 `"${item.region}"`, `"${item.asset}"`, `"${item.buyer}"`, `"${item.seller}"`,
-                `"${gfaText}"`, `"${item.capacity}"`, `"${priceText}"`, `"${item.dateStr}"`,
-                `"${item.remarks}"`, `"${item.source}"`, `"${item.link}"`
+                item.gfaNum, item.capacityNum, `"${item.currency}"`, item.priceNum, `"${item.dateStr}"`,
+                `"${remarks}"`, `"${item.source}"`, `"${item.link}"`
             ];
             csvRows.push(row.join(","));
         });
         const blob = new Blob([csvRows.join("\n")], { type: 'text/csv;charset=utf-8;' });
         const link = document.createElement("a");
         link.href = URL.createObjectURL(blob);
-        link.download = "APAC_DC_Export.csv";
+        link.download = "APAC_DC_Tracker_Export.csv";
         document.body.appendChild(link);
         link.click();
         document.body.removeChild(link);
