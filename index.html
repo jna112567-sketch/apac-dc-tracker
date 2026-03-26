@@ -76,7 +76,7 @@
 
 <header>
     <h1>APAC Data Centre Real Estate</h1>
-    <p>Live Database Tracker (Auto-Formatting Units)</p>
+    <p>Live Database Tracker</p>
 </header>
 
 <div class="container">
@@ -111,9 +111,9 @@
                     <th onclick="sortTable('asset')">Asset / Project <span id="arrow-asset" class="sort-arrow"></span></th>
                     <th onclick="sortTable('buyer')">Buyer / Investor <span id="arrow-buyer" class="sort-arrow"></span></th>
                     <th onclick="sortTable('seller')">Seller / Developer <span id="arrow-seller" class="sort-arrow"></span></th>
-                    <th onclick="sortTable('gfaNum')">GFA <span id="arrow-gfaNum" class="sort-arrow"></span></th>
-                    <th onclick="sortTable('capacityNum')">Capacity <span id="arrow-capacityNum" class="sort-arrow"></span></th>
-                    <th onclick="sortTable('priceNum')">Consideration <span id="arrow-priceNum" class="sort-arrow"></span></th>
+                    <th onclick="sortTable('gfa')">GFA (sqm) <span id="arrow-gfa" class="sort-arrow"></span></th>
+                    <th onclick="sortTable('capacity')">Capacity (MW) <span id="arrow-capacity" class="sort-arrow"></span></th>
+                    <th onclick="sortTable('price')">Consideration (USD Millions) <span id="arrow-price" class="sort-arrow"></span></th>
                     <th onclick="sortTable('dateVal')">Date <span id="arrow-dateVal" class="sort-arrow"></span></th>
                     <th>Remarks</th>
                     <th>Direct Article Source</th>
@@ -158,10 +158,9 @@
                     asset: row.Asset || "-",
                     buyer: row.Buyer || "-",
                     seller: row.Seller || "-",
-                    gfaNum: parseFloat(row.GFA_Number) || 0, // Reads pure number
-                    capacityNum: parseFloat(row.Capacity_Number) || 0, // Reads pure number
-                    currency: row.Currency || "USD",
-                    priceNum: parseFloat(row.Consideration_Number) || 0, // Reads pure number
+                    gfa: parseFloat(row.GFA_sqm) || 0, 
+                    capacity: parseFloat(row.Capacity_MW) || 0, 
+                    price: parseFloat(row.Consideration_USD_Millions) || 0, 
                     dateStr: row.Date || "-",
                     dateVal: row.Date ? new Date(row.Date) : new Date(0), 
                     remarks: row.Remarks || "-",
@@ -174,7 +173,7 @@
             renderChart(); 
         },
         error: function(err) {
-            document.getElementById('loadingMsg').innerHTML = "⚠️ Error loading transactions.csv. Make sure the headers match the new template perfectly.";
+            document.getElementById('loadingMsg').innerHTML = "⚠️ Error loading transactions.csv. Make sure the headers match exactly: Region,Asset,Buyer,Seller,GFA_sqm,Capacity_MW,Consideration_USD_Millions,Date,Remarks,Source,URL";
             document.getElementById('loadingMsg').style.color = "red";
         }
     });
@@ -212,7 +211,7 @@
         if (arrowSpan) { arrowSpan.innerHTML = sortAscending ? " ▲" : " ▼"; }
     }
 
-    // --- HTML GENERATION WITH AUTO-UNITS ---
+    // --- HTML GENERATION ---
     function renderTable() {
         const tbody = document.getElementById('tableBody');
         tbody.innerHTML = ""; 
@@ -220,18 +219,18 @@
         
         displayData.forEach(item => {
             // Auto-append the units for display!
-            let displayGFA = item.gfaNum > 0 ? item.gfaNum.toLocaleString() + " sqm" : "-";
-            let displayCap = item.capacityNum > 0 ? item.capacityNum + " MW" : "-";
-            let displayPrice = item.priceNum > 0 ? `${item.currency} ${item.priceNum.toLocaleString()}M` : "Undisclosed";
+            let displayGFA = item.gfa > 0 ? item.gfa.toLocaleString() + " sqm" : "-";
+            let displayCap = item.capacity > 0 ? item.capacity + " MW" : "-";
+            let displayPrice = item.price > 0 ? "USD " + item.price.toLocaleString() + "M" : "Undisclosed";
 
             const row = `<tr>
                 <td data-label="Region"><span class="tag ${item.class}">${item.region}</span></td>
                 <td data-label="Asset / Project"><strong>${item.asset}</strong></td>
                 <td data-label="Buyer / Investor">${item.buyer}</td>
                 <td data-label="Seller / Developer">${item.seller}</td>
-                <td data-label="GFA">${displayGFA}</td>
-                <td data-label="Capacity">${displayCap}</td>
-                <td data-label="Consideration">${displayPrice}</td>
+                <td data-label="GFA (sqm)">${displayGFA}</td>
+                <td data-label="Capacity (MW)">${displayCap}</td>
+                <td data-label="Consideration (USD Millions)">${displayPrice}</td>
                 <td data-label="Date">${item.dateStr}</td>
                 <td data-label="Remarks" class="remarks">${item.remarks}</td>
                 <td data-label="Direct Article Source"><a href="${item.link}" class="source-link" target="_blank">${item.source}</a></td>
@@ -244,12 +243,11 @@
         const ctx = document.getElementById('transactionChart').getContext('2d');
         let displayData = currentFilter === "All" ? data : data.filter(item => item.region === currentFilter);
         
-        // Chart uses the pure numbers we got back!
         const regionTotals = {};
         displayData.forEach(d => {
-            if (d.priceNum > 0) { 
+            if (d.price > 0) { 
                 if (!regionTotals[d.region]) { regionTotals[d.region] = 0; }
-                regionTotals[d.region] += d.priceNum;
+                regionTotals[d.region] += d.price;
             }
         });
         const sortedRegions = Object.keys(regionTotals).sort((a, b) => regionTotals[b] - regionTotals[a]);
@@ -261,7 +259,7 @@
             data: {
                 labels: sortedRegions,
                 datasets: [{
-                    label: 'Total Consideration Tracked (Millions)',
+                    label: 'Total Consideration Tracked (USD Millions)',
                     data: values,
                     backgroundColor: ['#003366', '#c5a059', '#1976d2', '#2e7d32', '#d84315', '#7b1fa2'],
                     borderRadius: 5
@@ -270,19 +268,19 @@
             options: {
                 responsive: true, maintainAspectRatio: false,
                 plugins: { legend: { display: true } },
-                scales: { y: { beginAtZero: true, title: { display: true, text: 'Transaction Value (Millions)' } } }
+                scales: { y: { beginAtZero: true, title: { display: true, text: 'USD Millions' } } }
             }
         });
     }
 
     function exportToCSV() {
-        let csvRows = ["Region,Asset,Buyer,Seller,GFA_Number,Capacity_Number,Currency,Consideration_Number,Date,Remarks,Source,URL"];
+        let csvRows = ["Region,Asset,Buyer,Seller,GFA_sqm,Capacity_MW,Consideration_USD_Millions,Date,Remarks,Source,URL"];
         let displayData = currentFilter === "All" ? data : data.filter(item => item.region === currentFilter);
         displayData.forEach(item => {
             let remarks = item.remarks.replace(/"/g, '""');
             let row = [
                 `"${item.region}"`, `"${item.asset}"`, `"${item.buyer}"`, `"${item.seller}"`,
-                item.gfaNum, item.capacityNum, `"${item.currency}"`, item.priceNum, `"${item.dateStr}"`,
+                item.gfa, item.capacity, item.price, `"${item.dateStr}"`,
                 `"${remarks}"`, `"${item.source}"`, `"${item.link}"`
             ];
             csvRows.push(row.join(","));
