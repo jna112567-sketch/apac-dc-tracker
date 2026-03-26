@@ -1,3 +1,3 @@
-Region,Asset / Project,Buyer / Investor,Seller / Developer,GFA,Capacity,Consideration,Date,Remarks,Source,Direct_URL
-South Korea,Sample Data Centre,Tech Corp,Real Estate Inc,50000 sq ft,20 MW,KRW 100B,Mar-26,Test transaction to verify template.,Tech News,https://example.com
-Hong kong,Sample Data Centre,Tech Corp,Real Estate Inc,10000000 sq ft,20 MW,USD 100M,Jan-26,Test transaction to verify template.,Tech News,https://example.com
+Region,Asset,Buyer,Seller,GFA_Number,Capacity_Number,Currency,Consideration_Number,Date,Remarks,Source,URL
+South Korea,Sample Data Centre,Tech Corp,Real Estate Inc,50000,20,KRW,100,2026-03-01,Test transaction to verify template.,Tech News,https://example.com
+Hong Kong,Sample Data Centre,Tech Corp,Real Estate Inc,17187,16,USD,275,2026-01-01,Test transaction to verify template.,Tech News,https://example.com
