@@ -2,17 +2,17 @@ import streamlit as st
 import pandas as pd
 import plotly.express as px
 import feedparser
-from io import BytesIO
-import urllib.parse
-import os
 import yfinance as yf
 import requests
 import ssl
-import sqlite3             # Add this for the database
-import urllib.request      # Add this for URL handling
-from io import BytesIO     # Add this for Excel/CSV processing
+import sqlite3             
+import urllib.request      
+import urllib.parse
+import os
+from io import BytesIO
+import traceback     
 
-# Fix for Corporate SSL/Zscaler Certificate errors
+# --- GLOBAL SSL FIX (For Corporate Firewalls) ---
 try:
     _create_unverified_https_context = ssl._create_unverified_context
 except AttributeError:
@@ -23,35 +23,98 @@ else:
 # ==========================================
 # 1. PAGE CONFIG & APP SETUP
 # ==========================================
-st.set_page_config(page_title="APAC Data Centre Tracker", layout="wide", page_icon="🏢")
+st.set_page_config(page_title="APAC DC Intelligence Tracker", page_icon="🏢", layout="wide")
+
+# --- DEFINE GLOBAL VARIABLES ---
+DB_SQLITE = "apac_dc_transactions.db"  
+
+# ADD THIS DICTIONARY:
+AREA_RATES = {
+    "South Korea": 1.0,
+    "Japan": 1.0,
+    "Hong Kong": 1.0,
+    "Singapore": 1.0,
+    "Australia": 1.0,
+    "Malaysia": 1.0
+}
 
 GEO_COORDS = {
     "South Korea": {"lat": 35.9078, "lon": 127.7669},
+    "Japan": {"lat": 36.2048, "lon": 138.2529},
     "Hong Kong": {"lat": 22.3193, "lon": 114.1694},
-    "Australia": {"lat": -25.2744, "lon": 133.7751},
-    "Malaysia": {"lat": 4.2105, "lon": 101.9758},
     "Singapore": {"lat": 1.3521, "lon": 103.8198},
-    "Japan": {"lat": 36.2048, "lon": 138.2529}
+    "Australia": {"lat": -25.2744, "lon": 133.7751},
+    "Malaysia": {"lat": 4.2105, "lon": 101.9758}
 }
-
-AREA_RATES = {"sqm": 1.0, "sqft": 0.0929, "acres": 4046.86}
-DB_SQLITE = "datacenter.db"
-
 # ==========================================
-# 2. HIGH-SPEED API DATA FETCHERS
+# 2. DATA ENGINES (Cached Functions)
 # ==========================================
-@st.cache_data(ttl=86400)
+
+@st.cache_data(ttl=3600)
 def get_live_fx():
     rates = {"USD": 1.0}
-    tickers = {"KRW": "KRW=X", "HKD": "HKD=X", "AUD": "AUDUSD=X", "SGD": "SGD=X", "JPY": "JPY=X"}
-    for currency, ticker in tickers.items():
-        try:
-            rate = yf.Ticker(ticker).fast_info['lastPrice']
-            rates[currency] = rate if currency == "AUD" else 1 / rate
-        except Exception:
-            fallback = {"KRW": 0.00074, "HKD": 0.13, "AUD": 0.65, "SGD": 0.74, "JPY": 0.0066}
-            rates[currency] = fallback.get(currency, 1.0)
+    try:
+        # Try to pull live rates
+        url = "https://api.exchangerate-api.com/v4/latest/USD"
+        response = requests.get(url, timeout=5)
+        data = response.json()
+        rates = data.get("rates", rates)
+    except Exception:
+        # Fallback APAC rates if office firewall blocks the API
+        rates.update({
+            "SGD": 1.34, "AUD": 1.52, "JPY": 150.0,
+            "KRW": 1330.0, "HKD": 7.82, "MYR": 4.75
+        })
     return rates
+
+@st.cache_data(ttl=3600)
+def get_implied_market_cap_rates():
+    # One representative leader per country
+    benchmarks = {
+        "Singapore": "AJBU.SI",     # Keppel DC
+        "Australia": "GMG.AX",      # Goodman Group
+        "Japan": "3281.T",          # GLP J-REIT
+        "Hong Kong": "1686.HK",     # GDS Holdings
+        "South Korea": "350120.KS", # ESR Kendall Sq
+        "Malaysia": "5106.KL"       # Axis REIT
+    }
+    
+    results = []
+    for country, ticker_sym in benchmarks.items():
+        try:
+            t = yf.Ticker(ticker_sym)
+            info = t.info
+            
+            ev = info.get('enterpriseValue', 0)
+            ebitda = info.get('ebitda', 0)
+            
+            # If EBITDA is missing, fallback to Net Income + Interest
+            if not ebitda or ebitda == 0:
+                ebitda = info.get('netIncomeToCommon', 0) * 1.2 
+            
+            implied_cap = (ebitda / ev) * 100 if ev > 0 else 0
+            
+            results.append({
+                "Region": country,
+                "Proxy REIT": info.get('shortName', ticker_sym),
+                "Implied Cap Rate (%)": round(implied_cap, 2)
+            })
+        except:
+            continue
+            
+    # --- NEW FIREWALL FALLBACK LOGIC ---
+    # If the API was blocked and 'results' is empty, use these estimates:
+    if len(results) == 0:
+        return pd.DataFrame([
+            {"Region": "Singapore", "Proxy REIT": "Keppel DC (Proxy)", "Implied Cap Rate (%)": 5.20},
+            {"Region": "Australia", "Proxy REIT": "Goodman (Proxy)", "Implied Cap Rate (%)": 4.80},
+            {"Region": "Japan", "Proxy REIT": "GLP J-REIT (Proxy)", "Implied Cap Rate (%)": 3.90},
+            {"Region": "Hong Kong", "Proxy REIT": "GDS (Proxy)", "Implied Cap Rate (%)": 6.10},
+            {"Region": "South Korea", "Proxy REIT": "ESR (Proxy)", "Implied Cap Rate (%)": 5.50},
+            {"Region": "Malaysia", "Proxy REIT": "Axis REIT (Proxy)", "Implied Cap Rate (%)": 6.50}
+        ])
+
+    return pd.DataFrame(results)
 
 @st.cache_data(ttl=86400)
 def load_live_macro_data():
@@ -70,10 +133,12 @@ def load_live_macro_data():
 
     # FRED API INJECTION (Using your provided Key)
     fred_series = {
-        "South Korea": "INTDSRKRM193N", 
-        "Japan": "IRSTCB01JPM156N",     
-        "Australia": "IRSTCB01AUM156N", 
-        "Hong Kong": "FEDFUNDS"         
+        "South Korea": "IRLTLT01KRM156N", # Korea 10Y
+        "Japan": "IRLTLT01JPM156N",       # Japan 10Y
+        "Australia": "IRLTLT01AUM156N",   # Australia 10Y
+        "Hong Kong": "MAEST10Y",          # HK 10Y (via FRED)
+        "Singapore": "SGS10Y",            # SG 10Y (Approx)
+        "Malaysia": "IRLTLT01MYM156N"     # Malaysia 10Y
     }
     
     for country, series_id in fred_series.items():
@@ -98,12 +163,18 @@ def load_live_macro_data():
             temp_dict = {country_map.get(item['country']['value'], item['country']['value']): (item['value'] / 1e9 if 'GDP' in ind_name else item['value'] / 1e6 if 'Population' in ind_name else item['value']) for item in response if item['value'] is not None}
             df_macro[ind_name] = df_macro['Region'].map(temp_dict)
             
-        df_macro['Interest Rate (%)'] = df_macro['Region'].map(lambda x: interest_rates[x]["Rate (%)"])
-        df_macro['Rate Last Updated'] = df_macro['Region'].map(lambda x: interest_rates[x]["Date"])
+        df_macro['10Y Bond Yield (%))'] = df_macro['Region'].map(lambda x: interest_rates[x]["Rate (%)"])
+        df_macro['Yield Last Updated'] = df_macro['Region'].map(lambda x: interest_rates[x]["Date"])
         return df_macro
     except Exception:
-        return pd.DataFrame({"Region": list(GEO_COORDS.keys()), "GDP (USD Billions)": [1712, 359, 4110, 1790, 501, 406], "Inflation Rate (%)": [2.8, 2.0, 2.5, 3.4, 2.5, 1.5], "Population (Millions)": [51.4, 7.5, 124.5, 26.6, 5.9, 34.3], "Interest Rate (%)": [2.5, 3.75, 0.75, 4.1, 3.5, 3.0], "Rate Last Updated": ["Q1 2026"] * 6})
-
+            # Fallback if FRED API is blocked
+            return pd.DataFrame({
+                "Region": ["South Korea", "Hong Kong", "Japan", "Australia", "Singapore", "Malaysia"],
+                "10Y Bond Yield (%)": [3.45, 3.80, 1.05, 4.25, 3.15, 3.90],  # <--- MUST MATCH EXACTLY
+                "GDP (USD Billions)": [1712, 359, 4110, 1790, 501, 406],
+                "Yield Source": ["Estimated 10Y Yield (Mar 2026)"] * 6,
+                "Inflation Rate (%)": [2.8, 2.0, 2.5, 3.4, 2.5, 1.5]
+            })
 # ==========================================
 # 3. TRANSACTION DATA PROCESSING
 # ==========================================
@@ -160,6 +231,7 @@ def process_df_logic(df_tx):
     df_tx['USD_per_MW'] = df_tx.apply(lambda row: row['Consideration_USD_M'] / row['Capacity_MW'] if row['Capacity_MW'] > 0 else 0, axis=1)
     df_tx['GFA_sqm'] = df_tx['GFA_Value'] * df_tx['GFA_Unit'].map(AREA_RATES).fillna(1.0)
     
+    
     df_tx['lat'] = df_tx['Region'].map(lambda x: GEO_COORDS.get(x, {}).get("lat", 0))
     df_tx['lon'] = df_tx['Region'].map(lambda x: GEO_COORDS.get(x, {}).get("lon", 0))
     
@@ -199,25 +271,13 @@ def load_tx_data():
         conn.close()
         return process_df_logic(df_local)
     except Exception as e:
-        st.error(f"Critical Error: {e}")
-        return pd.DataFrame()
+            st.error(f"Critical Error: {e}")
+            st.code(traceback.format_exc()) # <--- This will print the exact line number!
+            st.sidebar.warning("❌ No valid data found. Check your Google Sheet or 'datacenter.db' file.")
+            return pd.DataFrame()
 
     except Exception as e:
         st.sidebar.warning("⚠️ Corporate Firewall blocked Google Sheets. Switching to Local Database.")
-
-    # 2. FALLBACK TO LOCAL SQLITE (If Google Fails)
-    try:
-        init_sqlite_db() # Ensure the DB and seed data exist
-        conn = sqlite3.connect(DB_SQLITE)
-        df_local = pd.read_sql("SELECT * FROM transactions", conn)
-        conn.close()
-        
-        # Format the local data just like the online data
-        df_local['Date'] = pd.to_datetime(df_local['Date'], errors='coerce')
-        return df_local
-    except Exception as fatal_e:
-        st.error(f"Critical Error: Could not load local or remote data. {fatal_e}")
-        return pd.DataFrame()
 
 # --- EXECUTE LOAD ---
 df = load_tx_data()
@@ -289,17 +349,63 @@ with tab1:
     st.markdown("**Live Regional Macroeconomic Indicators (Powered by World Bank & FRED API)**")
     st.dataframe(filtered_macro_df, hide_index=True, width='stretch')
 
-with tab2:
+with tab2: # --- SECTION 2: UI TAB 2 ---
+    st.header("🎯 Market Risk Premium Analysis")
+    
+    # Run the engines
+    reit_df = get_implied_market_cap_rates()
+    macro_data = load_live_macro_data()
+    
+    # --- SAFE MERGE AND CALCULATE ---
+    # 1. Print the actual columns to the screen so we can see what's wrong
+    st.warning(f"🕵️ Debug: The actual columns in macro_data are: {macro_data.columns.tolist()}")
+    
+    # 2. Safety Net: Check what the column is actually named and use that
+    if '10Y Bond Yield (%)' in macro_data.columns:
+        yield_col = '10Y Bond Yield (%)'
+    elif 'Interest Rate (%)' in macro_data.columns:
+        yield_col = 'Interest Rate (%)'
+    else:
+        # If all else fails, grab the 2nd column (assuming Region is 1st)
+        yield_col = macro_data.columns[1] 
+
+    # 3. Perform the merge using the safe column name
+    analysis_df = pd.merge(reit_df, macro_data[['Region', yield_col]], on="Region")
+    
+    # 4. Standardize the column name so the rest of the math works
+    analysis_df.rename(columns={yield_col: '10Y Bond Yield (%)'}, inplace=True)
+    
+    # Calculate Risk Premium
+    analysis_df['Risk Premium (bps)'] = (analysis_df['Implied Cap Rate (%)'] - analysis_df['10Y Bond Yield (%)']) * 100
+    
+    # Show Table
+    st.dataframe(analysis_df, use_container_width=True)
+    
+    # --- SECTION 3: THE CHART ---
+    st.subheader("Visualizing the Yield Gap")
+
+    # Create a dual-axis style chart
+    chart_data = analysis_df.melt(id_vars='Region', value_vars=['10Y Bond Yield (%)', 'Implied Cap Rate (%)'])
+
+    st.bar_chart(
+        analysis_df, 
+        x="Region", 
+        y="Risk Premium (bps)", 
+        color="#0046ad" # Colliers Blue
+    )
+
+    st.info("💡 **Insight:** A wider blue bar indicates a 'cheaper' market where the Data Center yield offers a significant premium over government debt.")
     st.markdown("**🗄️ Transaction Database**")
     display_df = filtered_df[['Region', 'Asset', 'Status', 'Buyer', 'Seller', 'Capacity_MW', 'Consideration_USD_M', 'USD_per_MW', 'Currency', 'Consideration_Value', 'Date', 'Remarks', 'Direct_News_Link']].copy()
     display_df['Date'] = display_df['Date'].dt.strftime('%Y-%m-%d')
-    
+        
     col_formatting = {
         "Consideration_USD_M": st.column_config.NumberColumn("Unified Price", format="USD %d M"),
         "USD_per_MW": st.column_config.NumberColumn("Price per MW", format="USD %.1f M"),
         "Consideration_Value": st.column_config.NumberColumn("Local Price (Millions)", format="%d M"),
         "Direct_News_Link": st.column_config.LinkColumn("Direct News Link", display_text="📰 Read Article")
     }
+    
 
     st.subheader("✅ Executed Deals")
     st.dataframe(display_df[display_df['Status'] == 'Executed'], column_config=col_formatting, hide_index=True, width='stretch')
@@ -356,7 +462,7 @@ with tab3:
                 
                 sorted_entries = sorted(feed.entries, key=lambda x: x['dt_parsed'], reverse=True)
                 
-                for entry in sorted_entries[:10]: 
+                for entry in sorted_entries[:10]:  
                     st.markdown(f"📰 **[{entry.title}]({entry.link})**")
                     st.caption(f"Published: {entry['dt_parsed'].strftime('%B %d, %Y')}")
                     st.write("") 
